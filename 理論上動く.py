@@ -21,6 +21,114 @@ from oauth2client.service_account import ServiceAccountCredentials
 from decimal import Decimal
 
 #:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+# 変換関数
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+def decimal_to_int(obj):
+    if isinstance(obj, Decimal):
+        return int(obj)
+
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+# スプレッドシートのデータ取得
+#引数(シート名)
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+def spreadsheet_get_all_record(shtName):
+    
+    #スプレッドシート(認証)
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(
+        os.environ['Auth_File'],
+        os.environ['Scope'].split(', ')
+    )
+    gc = gspread.authorize(credentials)
+    
+    #スプレッドシートファイル取得
+    sh = gc.open(os.environ['Spread_FileName'])
+    
+    #スプレッドシートのworksheet取得
+    wks = sh.worksheet(shtName)
+    
+    #すべてのデータを取得
+    data = wks.get_all_values()
+    
+    #戻り値
+    return data
+
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+# slackに返信
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+def slack_webhook_apiChannel(slackInputText, response_message):
+
+    text = 'actiasGPTより新規質問がありました。\n'
+    text = text + slackInputText + '\n' + response_message
+    
+    #URL
+    url = os.environ['Slack_URL']
+    
+    #slack送信
+    requests.post(url, data = json.dumps(
+        {
+            'text': text,
+            'username': u'actias GPT', #ユーザー名
+            'link_names': 1,           #名前をリンク化
+        }
+    ))
+    
+    #戻り値なし
+
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+# スプレッドシートに書き込み
+#引数(シート名、[eventID/userID]、[""/gateNum])
+#eventIDの出力/質問回答の蓄積かで引数が変わり、異なるシートへ出力される
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+def spreadsheet_write_record(shtName, columnA, columnB):
+    
+    #スプレッドシート(認証)
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(
+        os.environ['Auth_File'],
+        os.environ['Scope'].split(', ')
+    )
+    gc = gspread.authorize(credentials)
+    
+    #スプレッドシート名を環境変数から定義
+    sh = gc.open(os.environ['Spread_FileName'])
+    
+    #スプレッドシートのworksheet取得
+    wks = sh.worksheet(shtName)
+    
+    #終端行
+    lastRow = len(wks.col_values(1))
+    lastRow = lastRow + 1
+    
+    #シートデータクリア
+    if lastRow > 1000:
+        wks.clear()
+    
+    #シートへの出力
+    #columBがないとき(eventIDの出力)は
+    if columnB == '':
+        wks.update_cell(lastRow, 1, columnA)
+    #colimBがあるとき(シートの対象列に済を入れる)
+    else:
+        wks.update_cell(columnA, 4, "済")
+    
+    #戻り値なし
+
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+#発行IDの取得
+#引数(スプレッドのデータ)
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
+def get_id(table):
+    
+    #要素[3]に済が入っていなかったら、要素[0](発行番号)を返す
+    #処理が行われた時点で処理を終了する
+    for row in range(0, len(table)):
+        if table[row][3] == "":
+            gateNum = table[row][0]
+            gateNumRow = row
+            break
+
+    return gateNum,gateNumRow
+
+#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
 # main
 #:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
 def lambda_handler(event, context):
@@ -102,138 +210,3 @@ def lambda_handler(event, context):
     #        "Content-Type": "application/json"
     #    }
     #}
-
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-# 変換関数
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-def decimal_to_int(obj):
-    if isinstance(obj, Decimal):
-        return int(obj)
-
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-# スプレッドシートのデータ取得
-#引数(シート名)
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-def spreadsheet_get_all_record(shtName):
-    
-    #スプレッドシート(認証)
-    credentials = ServiceAccountCredentials.from_json_keyfile_name(
-        os.environ['Auth_File'],
-        os.environ['Scope'].split(', ')
-    )
-    gc = gspread.authorize(credentials)
-    
-    #スプレッドシートファイル取得
-    sh = gc.open(os.environ['Spread_FileName'])
-    
-    #スプレッドシートのworksheet取得
-    wks = sh.worksheet(shtName)
-    
-    #すべてのデータを取得
-    data = wks.get_all_values()
-    
-    #戻り値
-    return data
-
-
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-#slackに返信
-#引数(送信メッセージ、ユーザID、slackAPIトークン)
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-def slack_webhook(text, userID, slackToken):
-
-    # Slack APIのメッセージ送信エンドポイント
-    url = 'https://slack.com/api/chat.postMessage'
-
-    # メッセージを送信するパラメータを設定
-    data = {
-        'channel': userID,  # ユーザIDをチャンネルとして指定
-        'text': text,
-        'link_names': 1,  # 名前をリンク化
-    }
-
-    # ヘッダーにAPIトークンを設定
-    headers = {
-        'Authorization': f'Bearer {slackToken}'
-    }
-    
-    #webhookにてメッセージ送信
-    response = requests.post(url, data=data, headers=headers)
-    
-    #戻り値なし
-
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-# slackに返信
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-def slack_webhook_apiChannel(slackInputText, response_message):
-
-    text = 'actiasGPTより新規質問がありました。\n'
-    text = text + slackInputText + '\n' + response_message
-    
-    #URL
-    url = os.environ['Slack_URL']
-    
-    #slack送信
-    requests.post(url, data = json.dumps(
-        {
-            'text': text,
-            'username': u'actias GPT', #ユーザー名
-            'link_names': 1,           #名前をリンク化
-        }
-    ))
-    
-    #戻り値なし
-
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-# スプレッドシートに書き込み
-#引数(シート名、[eventID/userID]、[""/gateNum])
-#eventIDの出力/質問回答の蓄積かで引数が変わり、異なるシートへ出力される
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-def spreadsheet_write_record(shtName, columnA, columnB):
-    
-    #スプレッドシート(認証)
-    credentials = ServiceAccountCredentials.from_json_keyfile_name(
-        os.environ['Auth_File'],
-        os.environ['Scope'].split(', ')
-    )
-    gc = gspread.authorize(credentials)
-    
-    #スプレッドシート名を環境変数から定義
-    sh = gc.open(os.environ['Spread_FileName'])
-    
-    #スプレッドシートのworksheet取得
-    wks = sh.worksheet(shtName)
-    
-    #終端行
-    lastRow = len(wks.col_values(1))
-    lastRow = lastRow + 1
-    
-    #シートデータクリア
-    if lastRow > 1000:
-        wks.clear()
-    
-    #シートへの出力
-    #columBがないとき(eventIDの出力)は
-    if columnB == '':
-        wks.update_cell(lastRow, 1, columnA)
-    #colimBがあるとき(シートの対象列に済を入れる)
-    else:
-        wks.update_cell(columnA, 4, "済")
-    
-    #戻り値なし
-
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-#発行IDの取得
-#引数(スプレッドのデータ)
-#:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:=:
-def get_id(table):
-    
-    #要素[3]に済が入っていなかったら、要素[0](発行番号)を返す
-    #処理が行われた時点で処理を終了する
-    for row in range(0, len(table)):
-        if table[row][3] == "":
-            gateNum = table[row][0]
-            gateNumRow = row
-            break
-
-    return gateNum,gateNumRow
